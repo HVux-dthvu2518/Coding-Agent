@@ -1,0 +1,43 @@
+[package]
+name = "qwen-agent"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Local-first CLI agent for Qwen3.5:4B via Ollama"
+license = "MIT"
+
+[lib]
+name = "qwen_agent"
+path = "src/lib.rs"
+# `rustdoc` is absent from the offline toolchain this project targets, so
+# doctests cannot run there. Examples are covered by `tests/api_usage.rs`.
+doctest = false
+
+[[bin]]
+name = "qwen-agent"
+path = "src/main.rs"
+
+# A scripted stand-in for an Ollama daemon: used by the integration tests and
+# handy for demos on machines without Ollama installed. Built on demand with
+# `cargo run --bin fake-ollama` rather than shipped in `cargo install`.
+[[bin]]
+name = "fake-ollama"
+path = "src/bin/fake_ollama.rs"
+required-features = ["testing-server"]
+
+# ---------------------------------------------------------------------------
+# ZERO external dependencies (M0).
+#
+# crates.io is unreachable in the target environment, so M0 is built on `std`
+# only: a small HTTP/1.1 client, an NDJSON framer, a minimal JSON parser and a
+# TOML subset reader. See README.md ("Dependency strategy") for the migration
+# path to tokio/serde/reqwest/clap once a registry is available.
+# ---------------------------------------------------------------------------
+[dependencies]
+
+[features]
+# Enables the `fake-ollama` binary.
+testing-server = []
+
+[profile.release]
+opt-level = 2
