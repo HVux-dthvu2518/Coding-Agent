@@ -4,8 +4,9 @@
 //! permission class and an `execute` function. M1.1 added the trait, the
 //! definition, the result and the restricted context. M1.2 adds the closed
 //! JSON-subset validator, the registry (registration, lookup, permission
-//! enforcement, dispatch) and the batch executor. The built-ins arrive in M1.3
-//! and the orchestrator loop in M1.4.
+//! enforcement, dispatch) and the batch executor. M1.3 adds exactly three
+//! built-ins — `calculator.evaluate`, `workspace.list_files`, `system.get_time` —
+//! and the orchestrator loop arrives in M1.4.
 //!
 //! Two rules are baked into these types, because retrofitting them later is what
 //! makes tool layers unsafe:
@@ -17,6 +18,7 @@
 //!   role, time budget) — never the orchestrator, the provider or the
 //!   conversation.
 
+pub mod builtin;
 pub mod context;
 pub mod definition;
 pub mod executor;
@@ -24,6 +26,7 @@ pub mod registry;
 pub mod result;
 pub mod validation;
 
+pub use builtin::builtin_registry;
 pub use context::ToolContext;
 pub use definition::{Param, Permission, Schema, ToolDefinition};
 pub use executor::Executor;
