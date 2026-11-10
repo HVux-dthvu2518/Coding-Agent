@@ -331,13 +331,27 @@ mod tests {
     #[test]
     fn absolute_paths_are_refused() {
         let root = fixture("abs");
-        let values = crate::json::parse(r#"{"path":"/etc"}"#).unwrap();
-        let validated =
-            crate::tools::validation::validate(&ListFiles.definition(), &values).unwrap();
-        let err = ListFiles
-            .execute(&validated, &ToolContext::new(&root, WorkerRole::Researcher))
-            .unwrap_err();
-        assert!(err.to_string().contains("absolute"), "{err}");
+        // `/etc` is not `Path::is_absolute` on Windows but must still be
+        // refused, so this asserts the refusal *reason*, not the platform's
+        // notion of absoluteness.
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut cases = vec!["/etc", "/"];
+        #[cfg(windows)]
+        cases.extend([r"\\server\share", r"C:\Windows"]);
+        for path in cases {
+            let values = crate::json::parse(&format!(
+                r#"{{"path":{}}}"#,
+                crate::json::to_string(&Value::str(path))
+            ))
+            .unwrap();
+            let validated =
+                crate::tools::validation::validate(&ListFiles.definition(), &values).unwrap();
+            let err = ListFiles
+                .execute(&validated, &ToolContext::new(&root, WorkerRole::Researcher))
+                .unwrap_err();
+            assert_eq!(err.kind(), "rejected");
+            assert!(err.to_string().contains("absolute"), "{path}: {err}");
+        }
         let _ = std::fs::remove_dir_all(&root);
     }
 
