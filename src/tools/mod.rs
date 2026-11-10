@@ -1,10 +1,11 @@
-//! Tool calling (M1.1): the abstraction every later phase builds on.
+//! Tool calling (M1): abstraction, validation, registry, execution, built-ins.
 //!
 //! A tool is a named capability with a description, a typed parameter schema, a
-//! permission class and an `execute` function. M1.1 adds exactly that — the
-//! trait, the definition, the result and the restricted context — and nothing
-//! that uses them yet. The registry, validation, built-ins and the orchestrator
-//! loop arrive in M1.2–M1.4, each independently reviewable.
+//! permission class and an `execute` function. M1.1 added the trait, the
+//! definition, the result and the restricted context. M1.2 adds the closed
+//! JSON-subset validator, the registry (registration, lookup, permission
+//! enforcement, dispatch) and the batch executor. The built-ins arrive in M1.3
+//! and the orchestrator loop in M1.4.
 //!
 //! Two rules are baked into these types, because retrofitting them later is what
 //! makes tool layers unsafe:
@@ -18,11 +19,17 @@
 
 pub mod context;
 pub mod definition;
+pub mod executor;
+pub mod registry;
 pub mod result;
+pub mod validation;
 
 pub use context::ToolContext;
 pub use definition::{Param, Permission, Schema, ToolDefinition};
+pub use executor::Executor;
+pub use registry::{RegistryError, ToolRegistry};
 pub use result::{ToolError, ToolResult};
+pub use validation::ValidatedArgs;
 
 use crate::llm::request::ToolCall;
 
@@ -46,9 +53,18 @@ pub trait Tool: Send + Sync {
     /// division by zero with [`ToolError::Rejected`].
     fn execute(
         &self,
-        arguments: &crate::json::Value,
+        arguments: &ValidatedArgs,
         context: &ToolContext,
     ) -> Result<ToolResult, ToolError>;
+}
+
+/// The `tools[]` array for a chat request, built from the same definitions the
+/// registry validates against.
+pub fn ollama_tools(definitions: &[ToolDefinition]) -> Vec<crate::json::Value> {
+    definitions
+        .iter()
+        .map(ToolDefinition::to_ollama_json)
+        .collect()
 }
 
 /// Renders a tool call the way the CLI trace shows it: `name(key="value")`.
@@ -121,6 +137,29 @@ mod tests {
     }
 
     #[test]
+    fn ollama_tools_wraps_every_definition() {
+        let definition = ToolDefinition::new(
+            "calculator.evaluate",
+            "Evaluate.",
+            vec![Param::required("expression", Schema::string("Expr."))],
+            Permission::ReadOnly,
+        );
+        let tools = ollama_tools(&[definition]);
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0].get("type").unwrap().as_str(), Some("function"));
+        assert_eq!(
+            tools[0]
+                .get("function")
+                .unwrap()
+                .get("name")
+                .unwrap()
+                .as_str(),
+            Some("calculator.evaluate")
+        );
+        assert!(ollama_tools(&[]).is_empty());
+    }
+
+    #[test]
     fn a_tool_is_object_safe() {
         struct Echo;
         impl Tool for Echo {
@@ -129,7 +168,7 @@ mod tests {
             }
             fn execute(
                 &self,
-                _arguments: &crate::json::Value,
+                _arguments: &ValidatedArgs,
                 _context: &ToolContext,
             ) -> Result<ToolResult, ToolError> {
                 Ok(ToolResult::success(
@@ -144,7 +183,7 @@ mod tests {
         assert!(
             boxed
                 .execute(
-                    &Value::Null,
+                    &ValidatedArgs::default(),
                     &ToolContext::new(".", crate::agent::planner::WorkerRole::Coder)
                 )
                 .is_ok()
