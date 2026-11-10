@@ -46,12 +46,18 @@ impl ToolContext {
     /// Rejects absolute paths, `..` components, NUL bytes and — crucially —
     /// symlinks that point outside the workspace, which a lexical check alone
     /// would miss.
+    ///
+    /// "Absolute" is decided per platform, because `Path::is_absolute` answers a
+    /// different question on Windows: there, `/etc/passwd` is *not* absolute (it
+    /// has a root but no drive prefix), so relying on `is_absolute` alone let a
+    /// leading-slash path reach the component walk and report the wrong reason.
+    /// [`has_root_segment`] covers both spellings instead.
     pub fn resolve_in_workspace(&self, user_path: &str, tool: &str) -> Result<PathBuf, String> {
         if user_path.contains('\0') {
             return Err("path contains a NUL byte".into());
         }
         let candidate = Path::new(user_path);
-        if candidate.is_absolute() {
+        if candidate.is_absolute() || has_root_segment(candidate) {
             return Err(format!(
                 "absolute paths are not allowed; use a path relative to the workspace root ({tool})"
             ));
@@ -111,6 +117,17 @@ impl ToolContext {
     }
 }
 
+/// True when the path starts at a filesystem root.
+///
+/// On Unix that is `/` (also caught by `is_absolute`). On Windows it is any
+/// drive-relative or root-relative spelling: `\foo`, `/foo`, `C:foo`, `C:\foo`.
+fn has_root_segment(path: &Path) -> bool {
+    matches!(
+        path.components().next(),
+        Some(Component::RootDir | Component::Prefix(_))
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,8 +176,42 @@ mod tests {
 
     #[test]
     fn absolute_paths_are_refused() {
-        let err = ctx().resolve_in_workspace("/etc/passwd", "t").unwrap_err();
-        assert!(err.contains("absolute"), "{err}");
+        // Leading-slash form: absolute on Unix, *not* `is_absolute` on Windows,
+        // which is exactly the case that slipped through once.
+        // `mut` is only needed where the Windows spellings are appended.
+        #[cfg_attr(not(windows), allow(unused_mut))]
+        let mut cases = vec!["/", "/etc", "/etc/passwd", "//server/share"];
+        // Windows has further spellings; on Unix these are ordinary file names,
+        // so asserting they are refused there would be wrong.
+        #[cfg(windows)]
+        {
+            cases.extend([r"\\server\share", r"C:\Windows", "C:/Windows", "C:foo"]);
+        }
+        for path in cases {
+            match ctx().resolve_in_workspace(path, "t") {
+                Ok(resolved) => panic!("`{path}` should be refused, got {resolved:?}"),
+                Err(err) => assert!(err.contains("absolute"), "{path}: {err}"),
+            }
+        }
+    }
+
+    #[test]
+    fn has_root_segment_matches_every_absolute_spelling() {
+        for path in ["/", "/etc", "//server/share"] {
+            assert!(has_root_segment(Path::new(path)), "{path}");
+        }
+        #[cfg(windows)]
+        {
+            for path in [r"\\server\share", r"C:\foo", "C:/foo", "C:foo"] {
+                assert!(has_root_segment(Path::new(path)), "{path}");
+            }
+        }
+        for path in [".", "src", "src/main.rs", "./src", "../x", "a:b"] {
+            assert!(!has_root_segment(Path::new(path)), "{path}");
+        }
+        // A backslash is an ordinary character in a Unix file name.
+        #[cfg(unix)]
+        assert!(!has_root_segment(Path::new(r"\foo")));
     }
 
     #[test]
