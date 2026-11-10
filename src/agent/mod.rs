@@ -9,7 +9,9 @@ pub mod orchestrator;
 pub mod planner;
 pub mod reflection;
 pub mod state;
+pub mod workers;
 
 pub use context::Context;
 pub use orchestrator::{Event, LastTurn, Orchestrator, TurnOutcome};
 pub use state::{AgentState, StateMachine, TransitionError};
+pub use workers::WorkerProfile;

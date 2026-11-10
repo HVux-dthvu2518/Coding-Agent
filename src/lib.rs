@@ -56,6 +56,7 @@ pub mod llm;
 pub mod logging;
 pub mod server;
 pub mod toml;
+pub mod tools;
 
 /// Crate version, re-exported for banners and `--version`.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
